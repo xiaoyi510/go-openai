@@ -21,6 +21,7 @@ const chatCompletionsSuffix = "/chat/completions"
 var (
 	ErrChatCompletionInvalidModel       = errors.New("this model is not supported with this method, please use CreateCompletion client method instead") //nolint:lll
 	ErrChatCompletionStreamNotSupported = errors.New("streaming is not supported with this method, please use CreateChatCompletionStream")              //nolint:lll
+	ErrContentFieldsMisused             = errors.New("can't use both Content and MultiContent properties simultaneously")
 )
 
 type Hate struct {
@@ -52,24 +53,28 @@ type PromptAnnotation struct {
 	ContentFilterResults ContentFilterResults `json:"content_filter_results,omitempty"`
 }
 
+type ImageURLDetail string
+
 const (
-	ImageURLDetailHigh = "high"
-	ImageURLDetailLow  = "low"
-	ImageURLDetailAuto = "auto"
+	ImageURLDetailHigh ImageURLDetail = "high"
+	ImageURLDetailLow  ImageURLDetail = "low"
+	ImageURLDetailAuto ImageURLDetail = "auto"
 )
 
 type ChatMessageImageURL struct {
-	URL    string `json:"url,omitempty"`
-	Detail string `json:"detail,omitempty"`
+	URL    string         `json:"url,omitempty"`
+	Detail ImageURLDetail `json:"detail,omitempty"`
 }
 
+type ChatMessagePartType string
+
 const (
-	ChatMessagePartTypeText     string = "text"
-	ChatMessagePartTypeImageURL string = "image_url"
+	ChatMessagePartTypeText     ChatMessagePartType = "text"
+	ChatMessagePartTypeImageURL ChatMessagePartType = "image_url"
 )
 
 type ChatMessagePart struct {
-	Type     string               `json:"type,omitempty"`
+	Type     ChatMessagePartType  `json:"type,omitempty"`
 	Text     string               `json:"text,omitempty"`
 	ImageURL *ChatMessageImageURL `json:"image_url,omitempty"`
 }
@@ -96,7 +101,7 @@ type ChatCompletionMessage struct {
 
 func (m ChatCompletionMessage) MarshalJSON() ([]byte, error) {
 	if m.Content != "" && m.MultiContent != nil {
-		return nil, errors.New("can't use both Content and MultiContent files simultaneously")
+		return nil, ErrContentFieldsMisused
 	}
 	if len(m.MultiContent) > 0 {
 		msg := struct {
@@ -123,19 +128,6 @@ func (m ChatCompletionMessage) MarshalJSON() ([]byte, error) {
 }
 
 func (m *ChatCompletionMessage) UnmarshalJSON(bs []byte) error {
-	multiMsg := struct {
-		Role         string `json:"role"`
-		Content      string
-		MultiContent []ChatMessagePart `json:"content"`
-		Name         string            `json:"name,omitempty"`
-		FunctionCall *FunctionCall     `json:"function_call,omitempty"`
-		ToolCalls    []ToolCall        `json:"tool_calls,omitempty"`
-		ToolCallID   string            `json:"tool_call_id,omitempty"`
-	}{}
-	if err := json.Unmarshal(bs, &multiMsg); err == nil {
-		*m = ChatCompletionMessage(multiMsg)
-		return nil
-	}
 	msg := struct {
 		Role         string `json:"role"`
 		Content      string `json:"content"`
@@ -145,10 +137,23 @@ func (m *ChatCompletionMessage) UnmarshalJSON(bs []byte) error {
 		ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
 		ToolCallID   string        `json:"tool_call_id,omitempty"`
 	}{}
-	if err := json.Unmarshal(bs, &msg); err != nil {
+	if err := json.Unmarshal(bs, &msg); err == nil {
+		*m = ChatCompletionMessage(msg)
+		return nil
+	}
+	multiMsg := struct {
+		Role         string `json:"role"`
+		Content      string
+		MultiContent []ChatMessagePart `json:"content"`
+		Name         string            `json:"name,omitempty"`
+		FunctionCall *FunctionCall     `json:"function_call,omitempty"`
+		ToolCalls    []ToolCall        `json:"tool_calls,omitempty"`
+		ToolCallID   string            `json:"tool_call_id,omitempty"`
+	}{}
+	if err := json.Unmarshal(bs, &multiMsg); err != nil {
 		return err
 	}
-	*m = ChatCompletionMessage(msg)
+	*m = ChatCompletionMessage(multiMsg)
 	return nil
 }
 
